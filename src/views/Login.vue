@@ -22,7 +22,7 @@
             <n-form-item path="username">
               <n-input
                 v-model:value="loginForm.username"
-                placeholder="用户名或邮箱"
+                placeholder="账号"
                 :input-props="{ autocomplete: 'username' }"
               >
                 <template #prefix>
@@ -43,7 +43,7 @@
               >
                 <template #prefix>
                   <n-icon>
-                    <Lock />
+                    <LockClosed />
                   </n-icon>
                 </template>
               </n-input>
@@ -53,13 +53,6 @@
               <n-checkbox v-model:checked="loginForm.rememberMe">
                 记住我
               </n-checkbox>
-              <n-button
-                text
-                type="primary"
-                @click="router.push('/forgot-password')"
-              >
-                忘记密码？
-              </n-button>
             </div>
 
             <n-button
@@ -73,38 +66,6 @@
               登录
             </n-button>
           </n-form>
-
-          <n-divider>
-            <span class="divider-text">其他登录方式</span>
-          </n-divider>
-
-          <div class="social-login">
-            <n-button
-              size="large"
-              class="social-button"
-              @click="handleSocialLogin('qq')"
-            >
-              <template #icon>
-                <n-icon>
-                  <PersonCircle />
-                </n-icon>
-              </template>
-              QQ登录
-            </n-button>
-
-            <n-button
-              size="large"
-              class="social-button"
-              @click="handleSocialLogin('wechat')"
-            >
-              <template #icon>
-                <n-icon>
-                  <PersonCircle />
-                </n-icon>
-              </template>
-              微信登录
-            </n-button>
-          </div>
 
           <div class="register-prompt">
             <span>还没有账户？</span>
@@ -154,7 +115,7 @@ import { ref, reactive, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useMessage } from "naive-ui";
 import { useAuthStore } from "@/stores/auth";
-import { PersonCircle, Cube, Ribbon, Settings } from "@vicons/ionicons5";
+import { PersonCircle, Cube, Ribbon, Settings, LockClosed } from "@vicons/ionicons5";
 
 const router = useRouter();
 const message = useMessage();
@@ -173,7 +134,7 @@ const loginRules = {
   username: [
     {
       required: true,
-      message: "请输入用户名或邮箱",
+      message: "请输入账号",
       trigger: ["input", "blur"],
     },
   ],
@@ -246,11 +207,6 @@ const handleLogin = async () => {
     // 表单验证失败
     console.error("Login validation failed:", error);
   }
-};
-
-// 处理社交登录
-const handleSocialLogin = (provider) => {
-  message.info(`${provider === "qq" ? "QQ" : "微信"}登录功能开发中...`);
 };
 
 onMounted(() => {

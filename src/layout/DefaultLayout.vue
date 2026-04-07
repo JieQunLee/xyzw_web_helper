@@ -184,8 +184,8 @@
 import {
   useTokenStore,
   selectedToken,
-  selectedTokenId,
 } from "@/stores/tokenStore";
+import { useAuthStore } from "@/stores/auth";
 import ThemeToggle from "@/components/Common/ThemeToggle.vue";
 import {
   Home,
@@ -205,6 +205,7 @@ import { ref } from 'vue'
 import { isNowInLegionWarTime } from '@/utils/clubBattleUtils'
 
 const tokenStore = useTokenStore();
+const authStore = useAuthStore();
 const router = useRouter();
 const message = useMessage();
 
@@ -212,7 +213,7 @@ const isMobileMenuOpen = ref(false);
 
 const userMenuOptions = [
   {
-    label: "清除所有Token并退出",
+    label: "退出当前账号",
     key: "logout",
   },
 ];
@@ -221,9 +222,9 @@ const userMenuOptions = [
 const handleUserAction = async (key) => {
   switch (key) {
     case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
+      await authStore.logout();
+      message.success("已退出当前账号");
+      router.push("/login");
       break;
   }
 };

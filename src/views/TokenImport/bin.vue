@@ -78,6 +78,7 @@ import {
 
 import PQueue from "p-queue";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { buildIndexedDbTokenKey } from "@/stores/accountNamespace";
 import { getTokenId, transformToken, getServerList } from "@/utils/token";
 import { g_utils } from "@/utils/bonProtocol";
 
@@ -193,7 +194,10 @@ const addSelectedRole = async (roleInfo: any) => {
     const roleName = roleInfo.name || `角色_${roleInfo.roleId}`;
 
     // 刷新indexDB数据库token数据 (保存原始bin)
-    const saved = await storeArrayBuffer(tokenId, newBinBuffer);
+    const saved = await storeArrayBuffer(
+      buildIndexedDbTokenKey(tokenId),
+      newBinBuffer,
+    );
     if (!saved) {
       throw new Error("保存BIN数据到IndexedDB失败，请检查浏览器存储空间或权限");
     }

@@ -106,6 +106,7 @@ import { Scan, Refresh, Close, CloudUpload } from "@vicons/ionicons5";
 import { NIcon, useMessage, NButton, NForm, NFormItem, NInput } from "naive-ui";
 import { getTokenId, transformToken, getServerList } from "@/utils/token";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { buildIndexedDbTokenKey } from "@/stores/accountNamespace";
 import { g_utils } from "@/utils/bonProtocol";
 import { useTokenStore } from "@/stores/tokenStore";
 const tokenStore = useTokenStore();
@@ -204,7 +205,7 @@ const addSelectedRole = async (roleInfo: any) => {
     const roleName = roleInfo.name || `角色_${roleInfo.roleId}`;
 
     // 刷新indexDB数据库token数据 (保存原始bin)
-    storeArrayBuffer(tokenId, newBinBuffer);
+    storeArrayBuffer(buildIndexedDbTokenKey(tokenId), newBinBuffer);
 
     let sid = Number(roleInfo.serverId);
     let roleIndex = 0;

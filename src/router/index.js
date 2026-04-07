@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import * as autoRoutes from "vue-router/auto-routes";
 import { useTokenStore } from '@/stores/tokenStore'
+import { useAuthStore } from '@/stores/auth'
 import { isNowInLegionWarTime } from "@/utils/clubBattleUtils"
 
 const generatedRoutes = autoRoutes.routes ?? [];
@@ -21,7 +22,8 @@ const my_routes = [
     component: () => import('@/views/TokenImport/index.vue'),
     meta: {
       title: 'Token管理',
-      requiresToken: false
+      requiresToken: false,
+      requiresAuth: true
     },
     props: route => ({
       token: route.query.token,
@@ -116,11 +118,21 @@ const my_routes = [
   // 兼容旧路由，重定向到新的token管理页面
   {
     path: '/login',
-    redirect: '/tokens'
+    name: 'Login',
+    component: () => import('@/views/Login.vue'),
+    meta: {
+      title: '登录',
+      guestOnly: true
+    }
   },
   {
     path: '/register',
-    redirect: '/tokens'
+    name: 'Register',
+    component: () => import('@/views/Register.vue'),
+    meta: {
+      title: '注册',
+      guestOnly: true
+    }
   },
   {
     path: '/game-roles',
@@ -150,15 +162,23 @@ const router = createRouter({
   }
 })
 
-// 热更新路由
-autoRoutes.handleHotUpdate?.(router);
-
 // 导航守卫
 router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
   const tokenStore = useTokenStore()
+  authStore.initAuth()
+  tokenStore.initTokenStore()
 
   // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - XYZW 游戏管理系统` : 'XYZW 游戏管理系统'
+  if (to.meta.guestOnly && authStore.isAuthenticated) {
+    next('/admin/dashboard')
+    return
+  }
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
+    return
+  }
   if(to.name==="LegionWar"&&!isNowInLegionWarTime()){
   // if(to.name==="LegionWar"&&isNowInLegionWarTime()){
     next('/admin/dashboard');

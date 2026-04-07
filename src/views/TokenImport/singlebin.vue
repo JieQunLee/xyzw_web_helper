@@ -74,6 +74,7 @@ import {
 
 import PQueue from "p-queue";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { buildIndexedDbTokenKey } from "@/stores/accountNamespace";
 import { getTokenId, transformToken } from "@/utils/token";
 
 const $emit = defineEmits(["cancel", "ok"]);
@@ -141,7 +142,10 @@ const uploadBin = (binFile: File) => {
       const roleToken = await transformToken(userToken);
       const roleName = roleMeta.roleName || binFile.name.split(".")?.[0] || "";
       // 刷新indexDB数据库token数据
-      const saved = await storeArrayBuffer(tokenId, userToken);
+      const saved = await storeArrayBuffer(
+        buildIndexedDbTokenKey(tokenId),
+        userToken,
+      );
       if (!saved) {
         message.error("保存BIN数据到IndexedDB失败");
         return;

@@ -7,16 +7,24 @@ import { createPinia } from "pinia";
 import naive from "naive-ui";
 import router from "./router";
 import App from "./App.vue";
+import { useAuthStore } from "@/stores/auth";
+import { useTokenStore } from "@/stores/tokenStore";
 // import { i18n } from './locales';
 
 // 创建应用实例
 const app = createApp(App);
+const pinia = createPinia();
 
 // 使用插件
-app.use(createPinia());
+app.use(pinia);
 app.use(router);
 app.use(naive);
 // app.use(i18n)
+
+const authStore = useAuthStore(pinia);
+const tokenStore = useTokenStore(pinia);
+authStore.initAuth();
+tokenStore.initTokenStore();
 
 // 全局主题应用：从 localStorage 读取并设置 data-theme 属性
 const applyTheme = () => {

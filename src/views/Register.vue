@@ -32,20 +32,6 @@
               </n-input>
             </n-form-item>
 
-            <n-form-item path="email">
-              <n-input
-                v-model:value="registerForm.email"
-                placeholder="邮箱地址"
-                :input-props="{ autocomplete: 'email' }"
-              >
-                <template #prefix>
-                  <n-icon>
-                    <Mail />
-                  </n-icon>
-                </template>
-              </n-input>
-            </n-form-item>
-
             <n-form-item path="password">
               <n-input
                 v-model:value="registerForm.password"
@@ -55,7 +41,7 @@
               >
                 <template #prefix>
                   <n-icon>
-                    <Lock />
+                    <LockClosed />
                   </n-icon>
                 </template>
               </n-input>
@@ -71,7 +57,7 @@
               >
                 <template #prefix>
                   <n-icon>
-                    <Lock />
+                    <LockClosed />
                   </n-icon>
                 </template>
               </n-input>
@@ -120,17 +106,18 @@ import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useMessage } from "naive-ui";
 import { useAuthStore } from "@/stores/auth";
-import { PersonCircle, Mail } from "@vicons/ionicons5";
+import { PersonCircle, LockClosed } from "@vicons/ionicons5";
 
 const router = useRouter();
 const message = useMessage();
 const authStore = useAuthStore();
 const registerFormRef = ref(null);
+const showTerms = ref(false);
+const showPrivacy = ref(false);
 
 // 注册表单数据
 const registerForm = reactive({
   username: "",
-  email: "",
   password: "",
   confirmPassword: "",
   agreeTerms: false,
@@ -148,18 +135,6 @@ const registerRules = {
       min: 3,
       max: 20,
       message: "用户名长度应在3-20个字符之间",
-      trigger: ["input", "blur"],
-    },
-  ],
-  email: [
-    {
-      required: true,
-      message: "请输入邮箱地址",
-      trigger: ["input", "blur"],
-    },
-    {
-      type: "email",
-      message: "请输入正确的邮箱格式",
       trigger: ["input", "blur"],
     },
   ],
@@ -205,7 +180,6 @@ const handleRegister = async () => {
 
     const result = await authStore.register({
       username: registerForm.username,
-      email: registerForm.email,
       password: registerForm.password,
     });
 

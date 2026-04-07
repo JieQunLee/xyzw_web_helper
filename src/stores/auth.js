@@ -1,14 +1,23 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { useLocalTokenStore } from "./localTokenManager";
+import { useTokenStore } from "./tokenStore";
+import {
+  AUTH_STORAGE_KEYS,
+  getRegisteredUsers,
+  setRegisteredUsers,
+  setActiveAccountId,
+} from "./accountNamespace";
 
 export const useAuthStore = defineStore("auth", () => {
   // 状态
   const user = ref(null);
-  const token = ref(localStorage.getItem("token") || null);
+  const token = ref(localStorage.getItem(AUTH_STORAGE_KEYS.token) || null);
   const isLoading = ref(false);
+  const isInitialized = ref(false);
 
   const localTokenStore = useLocalTokenStore();
+  const tokenStore = useTokenStore();
 
   // 计算属性
   const isAuthenticated = computed(() => !!token.value && !!user.value);
@@ -18,31 +27,43 @@ export const useAuthStore = defineStore("auth", () => {
   const login = async (credentials) => {
     try {
       isLoading.value = true;
+      const identity = (credentials.username || "").trim();
+      const password = credentials.password || "";
+      const users = getRegisteredUsers();
+      const matchedUser = users.find(
+        (item) =>
+          (item.username === identity || item.email === identity) &&
+          item.password === password,
+      );
 
-      // 模拟本地认证逻辑
-      const mockUser = {
-        id: "local_user_" + Date.now(),
-        username: credentials.username,
-        email: credentials.email || `${credentials.username}@local.game`,
-        avatar: "/icons/xiaoyugan.png",
-        createdAt: new Date().toISOString(),
-      };
+      if (!matchedUser) {
+        return { success: false, message: "用户名/邮箱或密码错误" };
+      }
 
-      const mockToken =
+      const sessionToken =
         "local_token_" +
+        matchedUser.id +
+        "_" +
         Date.now() +
         "_" +
         Math.random().toString(36).substr(2, 9);
 
-      token.value = mockToken;
-      user.value = mockUser;
+      token.value = sessionToken;
+      user.value = {
+        id: matchedUser.id,
+        username: matchedUser.username,
+        email: matchedUser.email,
+        avatar: matchedUser.avatar || "/icons/xiaoyugan.png",
+        createdAt: matchedUser.createdAt,
+      };
 
-      // 保存到本地存储
-      localStorage.setItem("token", token.value);
-      localStorage.setItem("user", JSON.stringify(user.value));
+      localStorage.setItem(AUTH_STORAGE_KEYS.token, token.value);
+      localStorage.setItem(AUTH_STORAGE_KEYS.user, JSON.stringify(user.value));
+      setActiveAccountId(user.value.id);
 
-      // 同时保存到token管理器
-      localTokenStore.setUserToken(mockToken);
+      localTokenStore.setUserToken(sessionToken);
+      tokenStore.initTokenStore();
+      await tokenStore.switchAccountNamespace(user.value.id);
 
       return { success: true };
     } catch (error) {
@@ -59,12 +80,8 @@ export const useAuthStore = defineStore("auth", () => {
       isLoading.value = true;
 
       // 检查用户名是否已存在（简单的本地检查）
-      const existingUsers = JSON.parse(
-        localStorage.getItem("registeredUsers") || "[]",
-      );
-      const userExists = existingUsers.some(
-        (u) => u.username === userInfo.username,
-      );
+      const existingUsers = getRegisteredUsers();
+      const userExists = existingUsers.some((u) => u.username === userInfo.username);
 
       if (userExists) {
         return { success: false, message: "用户名已存在" };
@@ -72,13 +89,16 @@ export const useAuthStore = defineStore("auth", () => {
 
       // 保存新用户信息到本地
       const newUser = {
-        ...userInfo,
+        username: userInfo.username,
+        email: userInfo.email || "",
+        password: userInfo.password,
         id: "user_" + Date.now(),
+        avatar: "/icons/xiaoyugan.png",
         createdAt: new Date().toISOString(),
       };
 
       existingUsers.push(newUser);
-      localStorage.setItem("registeredUsers", JSON.stringify(existingUsers));
+      setRegisteredUsers(existingUsers);
 
       return { success: true, message: "注册成功，请登录" };
     } catch (error) {
@@ -95,13 +115,14 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = null;
 
     // 清除本地存储
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    localStorage.removeItem(AUTH_STORAGE_KEYS.token);
+    localStorage.removeItem(AUTH_STORAGE_KEYS.user);
     localStorage.removeItem("gameRoles");
+    setActiveAccountId(null);
 
     // 清除token管理器中的数据
     localTokenStore.clearUserToken();
-    localTokenStore.clearAllGameTokens();
+    tokenStore.switchAccountNamespace(null);
   };
 
   // 获取用户信息 - 移除API调用，使用本地数据
@@ -110,7 +131,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (!token.value) return false;
 
       // 从本地存储获取用户信息
-      const savedUser = localStorage.getItem("user");
+      const savedUser = localStorage.getItem(AUTH_STORAGE_KEYS.user);
       if (savedUser) {
         try {
           user.value = JSON.parse(savedUser);
@@ -133,17 +154,26 @@ export const useAuthStore = defineStore("auth", () => {
 
   // 初始化认证状态 - 移除API验证，使用本地验证
   const initAuth = async () => {
-    const savedUser = localStorage.getItem("user");
-    if (token.value && savedUser) {
-      try {
-        user.value = JSON.parse(savedUser);
-        // 初始化token管理器
-        localTokenStore.initTokenManager();
-      } catch (error) {
-        console.error("初始化认证失败:", error);
-        logout();
-      }
+    if (isInitialized.value) return;
+
+    const savedUser = localStorage.getItem(AUTH_STORAGE_KEYS.user);
+    if (!token.value || !savedUser) {
+      isInitialized.value = true;
+      return;
     }
+
+    try {
+      user.value = JSON.parse(savedUser);
+      setActiveAccountId(user.value?.id || null);
+      localTokenStore.initTokenManager();
+      tokenStore.initTokenStore();
+      await tokenStore.switchAccountNamespace(user.value?.id || null);
+    } catch (error) {
+      console.error("初始化认证失败:", error);
+      logout();
+    }
+
+    isInitialized.value = true;
   };
 
   return {

@@ -1,6 +1,5 @@
-import { useLocalStorage } from "@vueuse/core";
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { g_utils, ProtoMsg } from "@/utils/bonProtocol";
 import { gameLogger, tokenLogger, wsLogger } from "@/utils/logger";
@@ -15,8 +14,15 @@ import {
 } from "@/utils/token";
 import { emitPlus, $emit } from "./events/index.js";
 import router from "@/router";
+import {
+  buildAccountStorageKey,
+  buildCrossTabConnectionKey,
+  buildIndexedDbTokenKey,
+  getActiveAccountId,
+  isIndexedDbTokenKeyForAccount,
+} from "./accountNamespace";
 
-const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
+const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll, getAllKeys } =
   useIndexedDB();
 
 declare interface TokenData {
@@ -67,19 +73,107 @@ declare interface TokenGroup {
   updatedAt?: string;
 }
 
-export const gameTokens = useLocalStorage<TokenData[]>("gameTokens", []);
+export const gameTokens = ref<TokenData[]>([]);
 export const hasTokens = computed(() => gameTokens.value.length > 0);
-export const selectedTokenId = useLocalStorage("selectedTokenId", "");
+export const selectedTokenId = ref<string | null>("");
 export const selectedToken = computed(() => {
   return gameTokens.value?.find((token) => token.id === selectedTokenId.value);
 });
-export const selectedRoleInfo = useLocalStorage<any>("selectedRoleInfo", null);
+export const selectedRoleInfo = ref<any>(null);
 
 // 跨标签页连接协调
-const activeConnections = useLocalStorage("activeConnections", {});
+const activeConnections = ref<Record<string, any>>({});
 
 // Token分组管理
-export const tokenGroups = useLocalStorage<TokenGroup[]>("tokenGroups", []);
+export const tokenGroups = ref<TokenGroup[]>([]);
+
+const currentAccountId = ref<string | null>(getActiveAccountId());
+const persistenceReady = ref(false);
+
+const parseStoredValue = <T>(key: string | null, fallback: T): T => {
+  if (!key) return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (error) {
+    tokenLogger.warn(`解析本地存储失败: ${key}`, error);
+    return fallback;
+  }
+};
+
+const persistScopedState = () => {
+  if (!persistenceReady.value || !currentAccountId.value) return;
+
+  const scopedEntries = [
+    ["gameTokens", gameTokens.value],
+    ["selectedTokenId", selectedTokenId.value],
+    ["selectedRoleInfo", selectedRoleInfo.value],
+    ["tokenGroups", tokenGroups.value],
+    ["activeConnections", activeConnections.value],
+  ] as const;
+
+  scopedEntries.forEach(([suffix, value]) => {
+    const key = buildAccountStorageKey(suffix, currentAccountId.value);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(value));
+  });
+};
+
+const resetRuntimeState = () => {
+  gameTokens.value = [];
+  selectedTokenId.value = "";
+  selectedRoleInfo.value = null;
+  tokenGroups.value = [];
+  activeConnections.value = {};
+};
+
+const loadScopedState = (accountId: string | null) => {
+  currentAccountId.value = accountId;
+  persistenceReady.value = false;
+
+  if (!accountId) {
+    resetRuntimeState();
+    persistenceReady.value = true;
+    return;
+  }
+
+  gameTokens.value = parseStoredValue<TokenData[]>(
+    buildAccountStorageKey("gameTokens", accountId),
+    [],
+  );
+  selectedTokenId.value = parseStoredValue<string | null>(
+    buildAccountStorageKey("selectedTokenId", accountId),
+    "",
+  );
+  selectedRoleInfo.value = parseStoredValue<any>(
+    buildAccountStorageKey("selectedRoleInfo", accountId),
+    null,
+  );
+  tokenGroups.value = parseStoredValue<TokenGroup[]>(
+    buildAccountStorageKey("tokenGroups", accountId),
+    [],
+  );
+  activeConnections.value = parseStoredValue<Record<string, any>>(
+    buildAccountStorageKey("activeConnections", accountId),
+    {},
+  );
+
+  if (
+    selectedTokenId.value &&
+    !gameTokens.value.some((token) => token.id === selectedTokenId.value)
+  ) {
+    selectedTokenId.value = "";
+  }
+
+  persistenceReady.value = true;
+  persistScopedState();
+};
+
+watch(gameTokens, persistScopedState, { deep: true });
+watch(selectedTokenId, persistScopedState);
+watch(selectedRoleInfo, persistScopedState, { deep: true });
+watch(tokenGroups, persistScopedState, { deep: true });
+watch(activeConnections, persistScopedState, { deep: true });
 
 /**
  * 重构后的Token管理存储
@@ -88,6 +182,7 @@ export const tokenGroups = useLocalStorage<TokenGroup[]>("tokenGroups", []);
 export const useTokenStore = defineStore("tokens", () => {
   const wsConnections = ref<WebCtx>({}); // WebSocket连接状态
   const connectionLocks = ref<LockCtx>({}); // 连接操作锁，防止竞态条件
+  const isInitialized = ref(false);
 
   // 游戏数据存储
   const gameData = ref({
@@ -255,7 +350,7 @@ export const useTokenStore = defineStore("tokens", () => {
     }
 
     // 同时删除IndexedDB中的数据
-    await deleteArrayBuffer(tokenId);
+    await deleteArrayBuffer(buildIndexedDbTokenKey(tokenId, currentAccountId.value));
 
     return true;
   };
@@ -366,11 +461,15 @@ export const useTokenStore = defineStore("tokens", () => {
         gameToken.importMethod === "wxQrcode"
       ) {
         // Bin形式token刷新
-        let userToken: ArrayBuffer | null = await getArrayBuffer(tokenId);
+        let userToken: ArrayBuffer | null = await getArrayBuffer(
+          buildIndexedDbTokenKey(tokenId, currentAccountId.value),
+        );
         let usedOldKey = false;
 
         if (!userToken) {
-          const tokenByName = await getArrayBuffer(gameToken.name);
+          const tokenByName = await getArrayBuffer(
+            buildIndexedDbTokenKey(gameToken.name, currentAccountId.value),
+          );
           if (tokenByName) {
             userToken = tokenByName;
             usedOldKey = true;
@@ -381,9 +480,14 @@ export const useTokenStore = defineStore("tokens", () => {
           const token = await transformToken(userToken);
           updateToken(tokenId, { ...gameToken, token });
           if (usedOldKey) {
-            const saved = await storeArrayBuffer(tokenId, userToken);
+            const saved = await storeArrayBuffer(
+              buildIndexedDbTokenKey(tokenId, currentAccountId.value),
+              userToken,
+            );
             if (saved) {
-              await deleteArrayBuffer(gameToken.name);
+              await deleteArrayBuffer(
+                buildIndexedDbTokenKey(gameToken.name, currentAccountId.value),
+              );
             }
           }
           refreshSuccess = true;
@@ -651,21 +755,24 @@ export const useTokenStore = defineStore("tokens", () => {
     action: string,
     sessionId: string = currentSessionId,
   ) => {
-    let state = useLocalStorage(`ws_connection_${tokenId}`, {
+    const storageKey = buildCrossTabConnectionKey(tokenId, currentAccountId.value);
+    const state = {
       action, // 'connecting', 'connected', 'disconnecting', 'disconnected'
       sessionId,
       timestamp: Date.now(),
       url: window.location.href,
-    });
+    };
+
+    localStorage.setItem(storageKey, JSON.stringify(state));
 
     if (activeConnections.value) {
-      activeConnections.value[tokenId] = state.value;
+      activeConnections.value[tokenId] = state;
     }
   };
 
   // 检查是否有其他标签页的活跃连接
   const checkCrossTabConnection = (tokenId: string) => {
-    const storageKey = `ws_connection_${tokenId}`;
+    const storageKey = buildCrossTabConnectionKey(tokenId, currentAccountId.value);
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
@@ -1184,10 +1291,20 @@ export const useTokenStore = defineStore("tokens", () => {
     });
 
     gameTokens.value = [];
-    selectedTokenId.value = null;
+    selectedTokenId.value = "";
+    tokenGroups.value = [];
+    selectedRoleInfo.value = null;
+    activeConnections.value = {};
 
-    // 清空IndexedDB
-    await clearAll();
+    // 仅清空当前账号命名空间下的 IndexedDB 数据
+    const accountId = currentAccountId.value;
+    if (accountId) {
+      const allKeys = await getAllKeys();
+      const deleteTasks = allKeys
+        .filter((key) => isIndexedDbTokenKeyForAccount(key, accountId))
+        .map((key) => deleteArrayBuffer(key));
+      await Promise.all(deleteTasks);
+    }
   };
 
   const cleanExpiredTokens = async () => {
@@ -1308,7 +1425,9 @@ export const useTokenStore = defineStore("tokens", () => {
           if (now - state.timestamp > 300000) {
             wsLogger.debug(`清理过期跨标签页状态: ${tokenId}`);
             delete activeConnections.value[tokenId];
-            localStorage.removeItem(`ws_connection_${tokenId}`);
+            localStorage.removeItem(
+              buildCrossTabConnectionKey(tokenId, currentAccountId.value),
+            );
           }
         });
       }, 10000); // 每10秒检查一次
@@ -1362,7 +1481,13 @@ export const useTokenStore = defineStore("tokens", () => {
 
       // 清理localStorage中的跨标签页状态
       Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith("ws_connection_")) {
+        if (
+          key.startsWith("ws_connection_") &&
+          currentAccountId.value &&
+          key.startsWith(
+            buildCrossTabConnectionKey("", currentAccountId.value),
+          )
+        ) {
           localStorage.removeItem(key);
         }
       });
@@ -1374,8 +1499,9 @@ export const useTokenStore = defineStore("tokens", () => {
   // 监听localStorage变化（跨标签页通信）
   const setupCrossTabListener = () => {
     window.addEventListener("storage", (event) => {
-      if (event.key?.startsWith("ws_connection_")) {
-        const tokenId = event.key.replace("ws_connection_", "");
+      const prefix = buildCrossTabConnectionKey("", currentAccountId.value);
+      if (event.key?.startsWith(prefix)) {
+        const tokenId = event.key.replace(prefix, "");
         wsLogger.debug(
           `检测到跨标签页连接状态变化: ${tokenId}`,
           event.newValue,
@@ -1407,6 +1533,12 @@ export const useTokenStore = defineStore("tokens", () => {
 
   // 初始化
   const initTokenStore = () => {
+    if (isInitialized.value) {
+      return;
+    }
+
+    loadScopedState(getActiveAccountId());
+
     // // 恢复数据
     // const savedTokens = localStorage.getItem('gameTokens')
     // const savedSelectedId = localStorage.getItem('selectedTokenId')
@@ -1443,6 +1575,7 @@ export const useTokenStore = defineStore("tokens", () => {
       });
     });
 
+    isInitialized.value = true;
     tokenLogger.info("Token Store 初始化完成，连接监控已启动");
   };
   const setBattleVersion = (version: number | null) => {
@@ -1555,6 +1688,33 @@ export const useTokenStore = defineStore("tokens", () => {
     });
   };
 
+  const switchAccountNamespace = async (accountId: string | null) => {
+    const currentTokenIds = Object.keys(wsConnections.value);
+    await Promise.all(
+      currentTokenIds.map((tokenId) => closeWebSocketConnectionAsync(tokenId)),
+    );
+    wsConnections.value = {};
+    connectionLocks.value = {};
+    gameData.value = {
+      roleInfo: null,
+      legionInfo: null,
+      commonActivityInfo: null,
+      bossTowerInfo: null,
+      evoTowerInfo: null,
+      presetTeam: null,
+      battleVersion: null,
+      studyStatus: {
+        isAnswering: false,
+        questionCount: 0,
+        answeredCount: 0,
+        status: "",
+        timestamp: null,
+      },
+      lastUpdated: null,
+    };
+    loadScopedState(accountId);
+  };
+
   return {
     // 状态
     gameTokens,
@@ -1601,6 +1761,7 @@ export const useTokenStore = defineStore("tokens", () => {
     cleanExpiredTokens,
     upgradeTokenToPermanent,
     initTokenStore,
+    switchAccountNamespace,
 
     //游戏内发送消息方法
     sendMessageToLegion,

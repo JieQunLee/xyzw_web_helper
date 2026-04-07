@@ -6,8 +6,18 @@
         <div class="header-content">
           <div class="header-top">
             <img src="/icons/xiaoyugan.png" alt="XYZW" class="brand-logo" />
-            <!-- 主题切换按钮 -->
-            <ThemeToggle />
+            <div class="header-user-actions">
+              <n-button quaternary @click="goToProfile">
+                <template #icon>
+                  <n-icon>
+                    <PersonCircle />
+                  </n-icon>
+                </template>
+                {{ currentUsername }}
+              </n-button>
+              <ThemeToggle />
+              <n-button @click="handleLogout">退出登录</n-button>
+            </div>
           </div>
           <h1>游戏Token管理</h1>
         </div>
@@ -618,6 +628,7 @@ import singleBinTokenForm from "./singlebin.vue";
 import WxQrcodeForm from "./wxqrcode.vue";
 
 import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
+import { useAuthStore } from "@/stores/auth";
 import {
   Add,
   Copy,
@@ -628,6 +639,7 @@ import {
   Home,
   Key,
   Menu,
+  PersonCircle,
   Refresh,
   Star,
   SyncCircle,
@@ -639,6 +651,7 @@ import { useRouter } from "vue-router";
 import { transformToken, scheduleAuthUserRequest } from "@/utils/token";
 import { $emit } from "@/stores/events/index.ts";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { buildIndexedDbTokenKey } from "@/stores/accountNamespace";
 const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
   useIndexedDB();
 // 接收路由参数
@@ -655,6 +668,10 @@ const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const tokenStore = useTokenStore();
+const authStore = useAuthStore();
+const currentUsername = computed(
+  () => authStore.userInfo?.username || "当前账号",
+);
 
 // 限流等待状态
 const rateLimitWaiting = ref(false);
@@ -758,6 +775,16 @@ const toggleSort = (field) => {
 const getSortIcon = (field) => {
   if (sortConfig.value.field !== field) return null;
   return sortConfig.value.direction === "asc" ? "↑" : "↓";
+};
+
+const goToProfile = () => {
+  router.push("/admin/profile");
+};
+
+const handleLogout = async () => {
+  await authStore.logout();
+  message.success("已退出当前账号");
+  router.push("/login");
 };
 
 const handleDragStart = (index, event) => {
@@ -888,10 +915,10 @@ const refreshToken = async (token) => {
       token.importMethod === "wxQrcode" ||
       token.importMethod === "bin"
     ) {
-      let userToken = await getArrayBuffer(token.id);
+      let userToken = await getArrayBuffer(buildIndexedDbTokenKey(token.id));
       let usedOldKey = false;
       if (!userToken) {
-        userToken = await getArrayBuffer(token.name);
+        userToken = await getArrayBuffer(buildIndexedDbTokenKey(token.name));
         usedOldKey = true;
       }
       if (userToken) {
@@ -901,8 +928,8 @@ const refreshToken = async (token) => {
           lastRefreshed: Date.now(),
         });
         if (usedOldKey) {
-          await storeArrayBuffer(token.id, userToken);
-          await deleteArrayBuffer(token.name);
+          await storeArrayBuffer(buildIndexedDbTokenKey(token.id), userToken);
+          await deleteArrayBuffer(buildIndexedDbTokenKey(token.name));
           console.log("已迁移IndexedDB数据:", token.name, "->", token.id);
         }
         message.success("Token刷新成功");
@@ -1666,18 +1693,17 @@ onUnmounted(() => {
 .header-top {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--spacing-md);
-  position: relative;
   width: 100%;
-  justify-content: center;
 }
 
-.theme-toggle {
-  position: absolute;
-  right: 0;
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+.header-user-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .brand-logo {
@@ -1685,6 +1711,16 @@ onUnmounted(() => {
   height: 64px;
   border-radius: var(--border-radius-medium);
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+@media (max-width: 768px) {
+  .header-top {
+    flex-direction: column;
+  }
+
+  .header-user-actions {
+    justify-content: center;
+  }
 }
 
 .header-content h1 {
